@@ -1,0 +1,5 @@
+__pycache__/
+*.pt
+Database/*
+!Database/.gitkeep
+.DS_Store
