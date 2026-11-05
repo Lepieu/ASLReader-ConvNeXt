@@ -37,7 +37,8 @@ def main():
     train.add_argument("--lr", type=float, default=LEARNING_RATE)
     train.add_argument("--no-pretrained", action="store_true", help="start from random weights instead of ImageNet")
     train.add_argument("--limit", type=int, default=None, help="only use this many images per category (quick tests)")
-    train.add_argument("--out", default=MODEL_PATH)
+    train.add_argument("--resume", default=None, help="keep training a network saved earlier instead of starting fresh")
+    train.add_argument("--out", default=MODEL_PATH, help="file to save the network to (written after every epoch)")
 
     predict = sub.add_parser("predict", help="categorize an image, a folder of images, or a video")
     predict.add_argument("path")
@@ -61,8 +62,15 @@ def Train(args):
     (train_loader, test_loader, categories) = load_data(args.data, args.batch_size, args.limit)
     print(len(categories), "categories:", categories)
 
-    print("Prepping neural network...")
-    model = PrepNeuralNetwork(len(categories), pretrained=not args.no_pretrained).to(device)
+    if args.resume:
+        print("Loading network from", args.resume)
+        (model, saved_categories, epochs_done) = LoadNetwork(args.resume, device)
+        if saved_categories != categories:
+            raise SystemExit(f"{args.resume} was trained on categories {saved_categories}, but the data has {categories}")
+    else:
+        print("Prepping neural network...")
+        model = PrepNeuralNetwork(len(categories), pretrained=not args.no_pretrained).to(device)
+        epochs_done = 0
     print(sum(p.numel() for p in model.parameters()), "parameters")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.05)
@@ -92,8 +100,38 @@ def Train(args):
         print(f"Epoch {epoch + 1}/{args.epochs} - loss: {total_loss / seen:.4f} - accuracy: {correct / seen:.4f}"
               f" - test_loss: {test_loss:.4f} - test_accuracy: {test_acc:.4f}")
 
-    torch.save({"state_dict": model.state_dict(), "categories": categories, "size": (height, width)}, args.out)
-    print("Saved model to", args.out)
+        # save every epoch so stopping early doesn't lose the training done so far
+        SaveNetwork(model, categories, epochs_done + epoch + 1, args.out)
+
+    print("Saved network to", args.out)
+
+
+"""
+Saves the network's weights along with the category names, so it can be loaded without the training data
+"""
+def SaveNetwork(model, categories, epochs, path):
+    torch.save({
+        "state_dict": model.state_dict(),
+        "categories": categories,
+        "size": (height, width),
+        "epochs": epochs,
+    }, path)
+
+
+"""
+Loads a network saved by SaveNetwork
+returns (model, categories, epochs trained so far)
+"""
+def LoadNetwork(path, device):
+    checkpoint = torch.load(path, map_location=device)
+    categories = checkpoint["categories"]
+
+    if tuple(checkpoint["size"]) != (height, width):
+        raise SystemExit(f"{path} was trained on {checkpoint['size']} images, but height x width is {(height, width)}")
+
+    model = PrepNeuralNetwork(len(categories), pretrained=False)
+    model.load_state_dict(checkpoint["state_dict"])
+    return (model.to(device), categories, checkpoint.get("epochs", 0))
 
 
 def Evaluate(model, loader, loss_fn, device):
@@ -116,12 +154,8 @@ Categorizes an image, every image in a folder, or the frames of a video using a 
 """
 def Predict(args):
     device = GetDevice()
-    checkpoint = torch.load(args.model, map_location=device)
-    categories = checkpoint["categories"]
-
-    model = PrepNeuralNetwork(len(categories), pretrained=False)
-    model.load_state_dict(checkpoint["state_dict"])
-    model.to(device).eval()
+    (model, categories, _) = LoadNetwork(args.model, device)
+    model.eval()
 
     if os.path.isdir(args.path):
         names = sorted(f for f in os.listdir(args.path) if not f.startswith("."))

@@ -10,7 +10,7 @@ Changes from the Keras version:
 - **No hand-edited `lettertonumber` dict or `outputs` variable.** The categories are read from the folder names in `Database/`.
 - **Images load lazily** from disk in batches, so large datasets like the 87k-image ASL alphabet set don't need to fit in RAM.
 - **Light data augmentation** (small rotations, shifts and color changes) on the training images only.
-- **The trained model is saved** and can categorize new images, folders of images, or videos (frames sampled at `FPS`).
+- **The trained network is saved to a file** after every epoch, can be loaded to keep training, and can categorize new images, folders of images, or videos (frames sampled at `FPS`).
 - Runs on an NVIDIA GPU (CUDA), an Apple Silicon GPU (MPS) or the CPU, whichever is available.
 
 ## Prerequisites
@@ -39,6 +39,26 @@ python photorecognition_convnext.py train --data Database --epochs 5
 ```
 
 For a quick test run, use `--limit 50` to take only 50 images per category. `--no-pretrained` trains from scratch.
+
+### Saving and loading the network
+
+The network is saved to `--out` (default `aslreader_convnext.pt`) after every epoch, so stopping training early keeps the progress so far. The file holds the weights, the category names, the image size and how many epochs it has been trained for, so it can be loaded without the training data.
+
+Keep training a saved network:
+
+```bash
+python photorecognition_convnext.py train --data Database --epochs 3 --resume aslreader_convnext.pt
+```
+
+The data must have the same categories the network was trained on. To use a saved network from your own code:
+
+```python
+from photorecognition_convnext import LoadNetwork, SaveNetwork, GetDevice
+
+model, categories, epochs = LoadNetwork("aslreader_convnext.pt", GetDevice())
+# ... use or train the model ...
+SaveNetwork(model, categories, epochs, "my_network.pt")
+```
 
 Categorize an image, a folder, or a video:
 
