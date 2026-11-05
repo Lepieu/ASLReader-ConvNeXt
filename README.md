@@ -69,3 +69,41 @@ python photorecognition_convnext.py predict path/to/video.mp4
 ```
 
 Image size, `FPS`, epochs, batch size and learning rate are constants at the top of the script, and most can also be overridden on the command line (`--help`).
+
+## The from-scratch NumPy network
+
+`Model.py` and `photorecognition_original.py` are a rewrite of the original ASLReader's hand-built CNN. It's still written from scratch, with NumPy as the only math library and no deep learning framework, but it's much faster and the training math is fixed.
+
+```bash
+python photorecognition_original.py train --data Database --epochs 10
+python photorecognition_original.py predict path/to/image.jpg   # or a folder, or a video
+```
+
+The network is saved to `aslreader_original.npz` and loaded by `predict`, or from your own code with `Model.Convolutional_NN.load(path)`. It takes the same `--limit`, `--batch-size`, `--lr` and `--out` options as the ConvNeXt script, and it also reads its categories from folder names.
+
+**Why it was slow:** the old version looped over every pixel in Python, and each pass made a few tiny NumPy calls on a 3×3 patch. Almost all the time went to Python and NumPy call overhead rather than math. One training step took about 160 ms per image, so an epoch of the 87k-image ASL set took about 3 hours.
+
+**What changed:**
+
+- **No per-pixel loops.** Convolution lines up every patch as a row of a matrix ("im2col"), so a whole layer becomes one matrix multiplication. Pooling uses reshapes. Backpropagation works the same way.
+- **Batches** of 32 images go through each layer together, instead of one image at a time.
+- **No repeated forward pass.** Backpropagation reuses the values saved by `forward()` instead of computing them again.
+- **Several filters per conv layer** (`setLayer("conv", (3, 3), 1, filters=8)`). The old version had one filter per layer, so it could only detect one kind of feature.
+- **Momentum** in the weight updates, which smooths out noisy batches.
+
+| | Old | New |
+|---|---|---|
+| Same network (1 filter per layer) | 161 ms/image, ~3.1 h/epoch | 2.6 ms/image, ~3 min/epoch (**63× faster**) |
+| Default network (8 and 16 filters) | – | 9.8 ms/image, ~11 min/epoch |
+
+**Training bugs fixed** (these were hurting accuracy):
+
+- Pooling backpropagation used `height + step` instead of `height * step` and an off-by-one index, so gradients went to the wrong pixels.
+- Conv backpropagation didn't multiply by the filter weights or apply ReLU's derivative when passing the gradient back.
+- The output used ReLU instead of softmax before the cross-entropy loss.
+- `range(1, epochs)` trained for one epoch fewer than asked.
+- Weights started with a fixed scale of 0.1; they now use He initialization, scaled to each layer's size.
+
+Every gradient has been checked numerically against the true derivative, and they match to within about 1e-10.
+
+This network is a learning project, so expect it to be much less accurate than ConvNeXt. It's small, trains from random weights, and its final layer depends on exactly where in the image a feature appears.
