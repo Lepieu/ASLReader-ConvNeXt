@@ -70,6 +70,17 @@ python photorecognition_convnext.py predict path/to/video.mp4
 
 Image size, `FPS`, epochs, batch size and learning rate are constants at the top of the script, and most can also be overridden on the command line (`--help`).
 
+## ConvNeXt V2
+
+`photorecognition_convnextv2.py` works the same way as the ConvNeXt script, with the same `train` and `predict` commands and options, but uses [ConvNeXt V2](https://arxiv.org/abs/2301.00808) from [timm](https://github.com/huggingface/pytorch-image-models). V2 adds Global Response Normalization (GRN) layers and was pretrained with a masked-autoencoder method (FCMAE), which generally makes it more accurate than V1 at the same size. The default is ConvNeXt V2-Tiny (28M parameters, the same size as V1-Tiny), pretrained with FCMAE and fine-tuned on ImageNet-22k and ImageNet-1k.
+
+```bash
+python photorecognition_convnextv2.py train --data Database --epochs 5
+python photorecognition_convnextv2.py predict path/to/image.jpg
+```
+
+Use `--arch` to pick another size, for example `convnextv2_nano.fcmae_ft_in22k_in1k` (15M parameters, faster) or `convnextv2_base.fcmae_ft_in22k_in1k` (89M parameters, more accurate). The saved file (`aslreader_convnextv2.pt`) records which size it is, so `predict` and `--resume` rebuild the right one. V1 and V2 saved files aren't interchangeable; each script only loads its own.
+
 ## The from-scratch NumPy network
 
 `Model.py` and `photorecognition_original.py` are a rewrite of the original ASLReader's hand-built CNN. It's still written from scratch, with NumPy as the only math library and no deep learning framework, but it's much faster and the training math is fixed.
